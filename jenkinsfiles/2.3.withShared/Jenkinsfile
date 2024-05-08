@@ -12,5 +12,13 @@ pipeline {
                 auditTools()
             }
         }
+        stage('Build') {
+            environment {
+                VERSION_SUFFIX = getVersionSuffix()
+            }
+            steps {
+                echo "Building version: ${VERSION} with suffix: ${VERSION_SUFFIX}"
+            }
+        }
     }
 }
