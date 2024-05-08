@@ -18,6 +18,12 @@ pipeline {
             }
             steps {
                 echo "Building version: ${VERSION} with suffix: ${VERSION_SUFFIX}"
+                sh 'chmod +x jenkinsfiles/build.sh'
+                withCredentials([string(credentialsId: 'an-api-key', variable: 'API_KEY')]) {
+                    sh '''
+                        ./jenkinsfiles/build.sh
+                    '''
+                }
             }
         }
     }
