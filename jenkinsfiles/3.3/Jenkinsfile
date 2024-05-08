@@ -1,46 +1,68 @@
 pipeline {
-   agent any
-    environment {
-      RELEASE='20.04'
+    agent any
+    parameters {
+        booleanParam(name: 'RC', defaultValue: false, description: 'Is this a Release Candidate?')
     }
-   stages {
-      stage('Build') {
+    environment {
+        VERSION = "0.1.0"
+        VERSION_RC = "rc.2"
+    }
+    stages {
+        stage('Audit tools') {
+            steps {
+                auditTools()
+            }
+        }
+        stage('Build') {
             environment {
-               LOG_LEVEL='INFO'
+                VERSION_SUFFIX = getVersionSuffix()
             }
             steps {
-               echo "Building release ${RELEASE} with log level ${LOG_LEVEL}..."
-               sh 'chmod +x jenkinsfiles/build.sh'
-               withCredentials([string(credentialsId: 'an-api-key', variable: 'API_KEY')]) {
-                  sh '''
-                     ./jenkinsfiles/build.sh
-                  '''
-               }
+              echo "Building version: ${VERSION} with suffix: ${VERSION_SUFFIX}"
+              sh 'dotnet build -p:VersionPrefix="${VERSION}" --version-suffix "${VERSION_SUFFIX}" ./m3/src/Pi.Web/Pi.Web.csproj'
             }
         }
-        stage('Test') {
+        stage('Unit Test') {
             steps {
-               echo "Testing release ${RELEASE}"
-               script {
-                  if (Math.random() > 0.5) {
-                     throw new Exception()
-                  }
-               }
-               writeFile file: 'test-results.txt', text: 'passed'
+              dir('./m3/src') {
+                sh '''
+                    dotnet test --logger "trx;LogFileName=Pi.Math.trx" Pi.Math.Tests/Pi.Math.Tests.csproj
+                    dotnet test --logger "trx;LogFileName=Pi.Runtime.trx" Pi.Runtime.Tests/Pi.Runtime.Tests.csproj
+                '''
+                mstest testResultsFile:"**/*.trx", keepLongStdio: true
+              }
             }
         }
-   }
-   post {
-      success {
-         archiveArtifacts 'test-results.txt'
-         slackSend channel: '#builds',
-                   color: 'good',
-                   message: "Release ${env.RELEASE}, success: ${currentBuild.fullDisplayName}."
-      }
-      failure {
-         slackSend channel: '#builds',
-                   color: 'danger',
-                   message: "Release ${env.RELEASE}, FAILED: ${currentBuild.fullDisplayName}."
-      }
-   }
+        stage('Smoke Test') {
+            steps {
+              sh 'dotnet ../src/Pi.Web/bin/Debug/netcoreapp3.1/Pi.Web.dll'
+            }
+        }
+        stage('Publish') {
+            when {
+                expression { return params.RC }
+            }
+            steps {
+                sh 'dotnet publish -p:VersionPrefix="${VERSION}" --version-suffix "${VERSION_RC}" ./m3/src/Pi.Web/Pi.Web.csproj -o ./out'
+                archiveArtifacts('out/')
+            }
+        }
+    }
+}
+
+String getVersionSuffix() {
+    if (params.RC) {
+        return env.VERSION_RC
+    } else {
+        return env.VERSION_RC + '+ci.' + env.BUILD_NUMBER
+    }
+}
+
+void auditTools() {
+    sh '''
+        git version
+        docker version
+        dotnet --list-sdks
+        dotnet --list-runtimes
+    '''
 }

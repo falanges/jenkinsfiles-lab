@@ -1,27 +1,41 @@
 pipeline {
-   agent any
+    agent any
     environment {
-      RELEASE='20.04'
+        VERSION = "0.1.0"
+        VERSION_RC = "rc.2"
     }
-   stages {
-      stage('Build') {
-            environment {
-               LOG_LEVEL='INFO'
-            }
+    stages {
+        stage('Audit tools') {
             steps {
-               echo "Building release ${RELEASE} with log level ${LOG_LEVEL}..."
+                sh '''
+                  git version
+                  docker version
+                  dotnet --list-sdks
+                  dotnet --list-runtimes
+                '''
             }
         }
-        stage('Test') {
+        stage('Build') {
             steps {
-               echo "Testing release ${RELEASE}"
-               writeFile file: 'test-results.txt', text: 'passed'
+              echo "Building version: ${VERSION} with suffix: ${VERSION_RC}"
+              sh 'dotnet build -p:VersionPrefix="${VERSION}" --version-suffix "${VERSION_RC}" ../src/Pi.Web/Pi.Web.csproj'
             }
         }
-   }
-   post {
-      success {
-         archiveArtifacts 'test-results.txt'
-      }
-   }
+        stage('Unit Test') {
+            steps {
+              dir('../src') {
+                sh '''
+                    dotnet test --logger "trx;LogFileName=Pi.Math.trx" Pi.Math.Tests/Pi.Math.Tests.csproj
+                    dotnet test --logger "trx;LogFileName=Pi.Runtime.trx" Pi.Runtime.Tests/Pi.Runtime.Tests.csproj
+                '''
+                mstest testResultsFile:"**/*.trx", keepLongStdio: true
+              }
+            }
+        }
+        stage('Smoke Test') {
+            steps {
+              sh 'dotnet ../src/Pi.Web/bin/Debug/netcoreapp3.1/Pi.Web.dll'
+            }
+        }
+    }
 }
